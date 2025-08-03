@@ -4,9 +4,9 @@
     <title>My VLSI Tool</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
-      .container { display: flex; gap: 20px; }
-      .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
-      .section { margin-bottom: 20px; }
+     .container { display: flex; gap: 20px; }
+     .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
+     .section { margin-bottom: 20px; }
         textarea { width: 100%; height: 200px; margin-bottom: 10px; }
         button { margin-right: 10px; padding: 8px 15px; }
         #terminal-output { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
@@ -70,6 +70,30 @@
     <script>
         const terminalElement = document.getElementById('terminal-output');
         const terminalInput = document.getElementById('terminal-input');
+        const rtlFileInput = document.getElementById('rtlFileInput');
+        const rtlCodeInput = document.getElementById('rtlCodeInput');
+        const elaborateBtn = document.getElementById('elaborateBtn');
+        const synGenBtn = document.getElementById('synGenBtn');
+        const synMapBtn = document.getElementById('synMapBtn');
+        const synOptBtn = document.getElementById('synOptBtn');
+        const generateNetlistBtn = document.getElementById('generateNetlistBtn');
+        const placeBtn = document.getElementById('placeBtn');
+        const ctsBtn = document.getElementById('ctsBtn');
+        const routeBtn = document.getElementById('routeBtn');
+
+        const allButtons =;
+
+        function setButtonsEnabled(enabled) {
+            allButtons.forEach(button => {
+                button.disabled =!enabled;
+            });
+            rtlFileInput.disabled =!enabled;
+            rtlCodeInput.disabled =!enabled;
+        }
+
+        // Disable buttons initially
+        setButtonsEnabled(false);
+
         const term = new Terminal({
             cursorBlink: true,
             convertEol: true
@@ -135,9 +159,49 @@
             term.write('Loading VLSI brain... (this might take a moment)\r\n');
             yosysModule = await runYosys(Module);
             term.write('VLSI brain loaded! Type "help" in the terminal.\r\n>');
+            setButtonsEnabled(true); // Enable buttons after Yosys is loaded
         }
 
         loadYosys(); // Start loading Yosys when the page opens
+
+        // Handle file input
+        rtlFileInput.addEventListener('change', (event) => {
+            const file = event.target.files;
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    rtlCodeInput.value = e.target.result;
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Handle Elaborate button click
+        elaborateBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Elaborate...\r\n');
+            try {
+                const verilogCode = rtlCodeInput.value;
+                if (!verilogCode.trim()) {
+                    term.write('Please provide Verilog code in the text area or by uploading a file.\r\n>');
+                    return;
+                }
+
+                // Write Verilog code to the virtual file system
+                yosysModule.FS.writeFile('/input.v', verilogCode); [1, 2]
+
+                // Run Yosys command for elaboration
+                // We assume the top module is named 'my_design' as per the placeholder
+                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [3, 4, 5]
+                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
+
+                term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during elaboration: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
     </script>
 </body>
 </html>
