@@ -4,9 +4,9 @@
     <title>My VLSI Tool</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
-     .container { display: flex; gap: 20px; }
-     .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
-     .section { margin-bottom: 20px; }
+    .container { display: flex; gap: 20px; }
+    .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
+    .section { margin-bottom: 20px; }
         textarea { width: 100%; height: 200px; margin-bottom: 10px; }
         button { margin-right: 10px; padding: 8px 15px; }
         #terminal-output { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
@@ -151,7 +151,6 @@
             print: function(text) { term.write(text + '\r\n'); },
             printErr: function(text) { term.write(text + '\r\n'); },
             // This is needed for Yosys to work with files
-            // We will set this up properly later
             FS: null
         };
 
@@ -163,6 +162,29 @@
         }
 
         loadYosys(); // Start loading Yosys when the page opens
+
+        // Dummy 45nm Liberty file content (simplified for demonstration)
+        const dummyLibertyFileContent = `library (gscl45nm) {
+delay_model : table_lookup;
+time_unit : "1ns";
+voltage_unit : "1V";
+current_unit : "1mA";
+capacitive_load_unit (1, pf);
+leakage_power_unit : "1nW";
+pulling_resistance_unit : "1kohm";
+cell (AND2X1) {
+area : 1.0;
+pin (A1) { direction : input; }
+pin (A2) { direction : input; }
+pin (Z) { direction : output; function : "A1 * A2"; }
+}
+cell (INVX1) {
+area : 0.5;
+pin (I) { direction : input; }
+pin (Z) { direction : output; function : "I'"; }
+}
+}
+`;
 
         // Handle file input
         rtlFileInput.addEventListener('change', (event) => {
@@ -193,7 +215,6 @@
                 // Run Yosys command for elaboration
                 // We assume the top module is named 'my_design' as per the placeholder
                 await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [2]
-                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
 
                 term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -209,7 +230,7 @@
             term.write('\r\nRunning Synthesize Generic...\r\n');
             try {
                 // Run Yosys command for generic synthesis
-                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [3]
+                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [2]
 
                 term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -218,6 +239,76 @@
                 setButtonsEnabled(true); // Re-enable buttons
             }
         });
+
+        // Handle Synthesize Map button click
+        synMapBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Synthesize Map...\r\n');
+            try {
+                // Ensure tech_files directory exists
+                yosysModule.FS.mkdir('/tech_files'); [1]
+                // Write dummy Liberty file to the virtual file system
+                yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent); [1]
+
+                // Run Yosys command for technology mapping
+                await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']); [2, 3]
+
+                term.write('\r\nTechnology Mapping complete. You can now proceed with optimization or netlist generation.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during technology mapping: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
+
+        // Handle Synthesize Optimize button click
+        synOptBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Synthesize Optimize...\r\n');
+            try {
+                // Run Yosys command for optimization
+                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [4]
+
+                term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during optimization: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
+
+        // Handle Generate Gate-Level Netlist button click
+        generateNetlistBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nGenerating Gate-Level Netlist...\r\n');
+            try {
+                // Write the netlist to a JSON file in the virtual file system
+                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [5]
+
+                // Read the generated JSON file content
+                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' }); [1]
+
+                // Create a Blob from the JSON string
+                const blob = new Blob([netlistJson], { type: 'application/json' }); [6]
+                const url = URL.createObjectURL(blob); [6]
+
+                // Create a temporary link and trigger download
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'gate_level_netlist.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url); [6]
+
+                term.write('\r\nGate-Level Netlist generated and downloaded as gate_level_netlist.json\r\n>');
+            } catch (error) {
+                term.write(`\r\nError generating netlist: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
     </script>
 </body>
 </html>
+```
