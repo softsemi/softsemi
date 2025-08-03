@@ -65,26 +65,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js"></script>
-    <script>
-        let yosysModule; // This will hold our Yosys tool
-
-        // This special code helps Yosys talk to our terminal
-        var Module = {
-            print: function(text) { term.write(text + '\r\n'); },
-            printErr: function(text) { term.write(text + '\r\n'); },
-            // This is needed for Yosys to work with files
-            // We will set this up properly later
-            FS: null
-        };
-
-        async function loadYosys() {
-            term.write('Loading VLSI brain... (this might take a moment)\r\n');
-            yosysModule = await runYosys(Module);
-            term.write('VLSI brain loaded! Type "help" in the terminal.\r\n>');
-        }
-
-        loadYosys(); // Start loading Yosys when the page opens
-    </script>
     <script src="https://unpkg.com/@xterm/xterm/lib/xterm.js"></script>
     <script src="https://unpkg.com/@xterm/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
     <script>
@@ -139,6 +119,25 @@
 
         // Initial prompt
         term.write('>');
+
+        let yosysModule; // This will hold our Yosys tool
+
+        // This special code helps Yosys talk to our terminal
+        var Module = {
+            print: function(text) { term.write(text + '\r\n'); },
+            printErr: function(text) { term.write(text + '\r\n'); },
+            // This is needed for Yosys to work with files
+            // We will set this up properly later
+            FS: null
+        };
+
+        async function loadYosys() {
+            term.write('Loading VLSI brain... (this might take a moment)\r\n');
+            yosysModule = await runYosys(Module);
+            term.write('VLSI brain loaded! Type "help" in the terminal.\r\n>');
+        }
+
+        loadYosys(); // Start loading Yosys when the page opens
     </script>
 </body>
 </html>
