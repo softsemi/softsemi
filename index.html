@@ -210,11 +210,12 @@ pin (Z) { direction : output; function : "I'"; }
                 }
 
                 // Write Verilog code to the virtual file system
-                yosysModule.FS.writeFile('/input.v', verilogCode); [1]
+                yosysModule.FS.writeFile('/input.v', verilogCode); [1, 2, 3, 4]
 
                 // Run Yosys command for elaboration
                 // We assume the top module is named 'my_design' as per the placeholder
-                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [2]
+                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']);
+                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
 
                 term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -230,7 +231,7 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Generic...\r\n');
             try {
                 // Run Yosys command for generic synthesis
-                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [2]
+                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']);
 
                 term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -246,12 +247,12 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Map...\r\n');
             try {
                 // Ensure tech_files directory exists
-                yosysModule.FS.mkdir('/tech_files'); [1]
+                yosysModule.FS.mkdir('/tech_files'); [1, 2]
                 // Write dummy Liberty file to the virtual file system
-                yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent); [1]
+                yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent); [1, 2, 3, 4]
 
                 // Run Yosys command for technology mapping
-                await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']); [2, 3]
+                await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']);
 
                 term.write('\r\nTechnology Mapping complete. You can now proceed with optimization or netlist generation.\r\n>');
             } catch (error) {
@@ -267,7 +268,7 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Optimize...\r\n');
             try {
                 // Run Yosys command for optimization
-                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [4]
+                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [5, 6]
 
                 term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
             } catch (error) {
@@ -283,14 +284,14 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nGenerating Gate-Level Netlist...\r\n');
             try {
                 // Write the netlist to a JSON file in the virtual file system
-                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [5]
+                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [7]
 
                 // Read the generated JSON file content
-                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' }); [1]
+                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' }); [2, 8]
 
                 // Create a Blob from the JSON string
-                const blob = new Blob([netlistJson], { type: 'application/json' }); [6]
-                const url = URL.createObjectURL(blob); [6]
+                const blob = new Blob([netlistJson], { type: 'application/json' }); [9, 10, 11, 12]
+                const url = URL.createObjectURL(blob); [9, 10, 11, 12]
 
                 // Create a temporary link and trigger download
                 const a = document.createElement('a');
@@ -299,7 +300,7 @@ pin (Z) { direction : output; function : "I'"; }
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url); [6]
+                URL.revokeObjectURL(url); [9, 10, 11, 12]
 
                 term.write('\r\nGate-Level Netlist generated and downloaded as gate_level_netlist.json\r\n>');
             } catch (error) {
