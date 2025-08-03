@@ -126,6 +126,8 @@
                     term.write('index.html\r\ntech_files/\r\n');
                 } else if (command === 'pwd') {
                     term.write('/\r\n');
+                } else if (command.startsWith('cd ')) {
+                    term.write('Changing directory is not fully supported yet.\r\n');
                 } else {
                     term.write('Unknown command: ' + command + '\r\n');
                 }
@@ -147,6 +149,8 @@
         term.write('>');
 
         let yosysModule; // This will hold our Yosys tool
+        let currentNetlist = null; // Global variable to store the current netlist after synthesis
+        let placedCells = {}; // Global variable to store the positions of placed cells
 
         // This special code helps Yosys talk to our terminal
         var Module = {
@@ -158,7 +162,7 @@
 
         async function loadYosys() {
             term.write('Loading VLSI brain... (this might take a moment)\r\n');
-            yosysModule = await runYosys(Module);
+            yosysModule = await runYosys(Module); [1, 2]
             term.write('VLSI brain loaded! Type "help" in the terminal.\r\n>');
             setButtonsEnabled(true); // Enable buttons after Yosys is loaded
         }
@@ -216,8 +220,8 @@ pin (Z) { direction : output; function : "I'"; }
 
                 // Run Yosys command for elaboration
                 // We assume the top module is named 'my_design' as per the placeholder
-                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [1, 2]
-                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
+                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [3, 4, 5]
+                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr [6, 7, 8]
 
                 term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -233,7 +237,7 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Generic...\r\n');
             try {
                 // Run Yosys command for generic synthesis
-                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [3]
+                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [4, 9, 10]
 
                 term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -249,12 +253,12 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Map...\r\n');
             try {
                 // Ensure tech_files directory exists
-                yosysModule.FS.mkdir('/tech_files'); [4, 5, 6]
+                yosysModule.FS.mkdir('/tech_files'); [11, 12, 13, 14, 15, 16]
                 // Write dummy Liberty file to the virtual file system
                 yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent);
 
                 // Run Yosys command for technology mapping
-                await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']); [1, 2, 7]
+                await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']); [4, 10]
 
                 term.write('\r\nTechnology Mapping complete. You can now proceed with optimization or netlist generation.\r\n>');
             } catch (error) {
@@ -270,7 +274,7 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Optimize...\r\n');
             try {
                 // Run Yosys command for optimization
-                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [1, 8, 7]
+                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [4, 17, 16]
 
                 term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
             } catch (error) {
@@ -286,10 +290,11 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nGenerating Gate-Level Netlist...\r\n');
             try {
                 // Write the netlist to a JSON file in the virtual file system
-                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [9, 10]
+                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [18, 19, 20, 21, 22]
 
                 // Read the generated JSON file content
-                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' }); [4, 11, 6]
+                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
+                currentNetlist = JSON.parse(netlistJson); // Store the netlist globally [23, 24, 2, 22, 25]
 
                 // Create a Blob from the JSON string
                 const blob = new Blob([netlistJson], { type: 'application/json' });
@@ -312,29 +317,27 @@ pin (Z) { direction : output; function : "I'"; }
             }
         });
 
-        // Store the netlist globally after placement for later use by routing
-        let placedCells = {};
-
         // Handle Place Cells button click
         placeBtn.addEventListener('click', async () => {
             setButtonsEnabled(false); // Disable buttons during operation
             term.write('\r\nRunning Place Cells...\r\n');
             try {
+                if (!currentNetlist) {
+                    term.write('Please generate the Gate-Level Netlist first.\r\n>');
+                    return;
+                }
+
                 // Clear previous drawing
                 ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
 
-                // Read the netlist JSON (assuming it was generated in the previous step)
-                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
-                const netlist = JSON.parse(netlistJson); [12, 13, 14]
-
-                const moduleName = Object.keys(netlist.modules); // Get the first module
-                const cells = netlist.modules[moduleName].cells; [9]
+                const moduleName = Object.keys(currentNetlist.modules);
+                const cells = currentNetlist.modules[moduleName].cells; [24, 26, 27]
 
                 placedCells = {}; // Reset for new placement
                 const cellWidth = 50; // Fixed width for visualization
                 const cellHeight = 30; // Fixed height for visualization
 
-                // Simple random placement
+                // Simple random placement [23, 28, 29, 30, 31, 32, 33]
                 for (const cellName in cells) {
                     const x = Math.random() * (designCanvas.width - cellWidth);
                     const y = Math.random() * (designCanvas.height - cellHeight);
@@ -373,40 +376,40 @@ pin (Z) { direction : output; function : "I'"; }
             const y1_h = y;
             const x2_h = x + length / 2;
             const y2_h = y;
-            ctx.beginPath();
-            ctx.moveTo(x1_h, y1_h);
-            ctx.lineTo(x2_h, y2_h);
+            ctx.beginPath(); [34, 35]
+            ctx.moveTo(x1_h, y1_h); [34, 35]
+            ctx.lineTo(x2_h, y2_h); [34, 35]
             ctx.strokeStyle = 'red';
             ctx.lineWidth = 2;
-            ctx.stroke();
+            ctx.stroke(); [34, 35]
 
             // Vertical lines at ends of horizontal line
             const x1_v1 = x - length / 2;
             const y1_v1 = y - length / 2;
             const x2_v1 = x - length / 2;
             const y2_v1 = y + length / 2;
-            ctx.beginPath();
-            ctx.moveTo(x1_v1, y1_v1);
-            ctx.lineTo(x2_v1, y2_v1);
-            ctx.stroke();
+            ctx.beginPath(); [34, 35]
+            ctx.moveTo(x1_v1, y1_v1); [34, 35]
+            ctx.lineTo(x2_v1, y2_v1); [34, 35]
+            ctx.stroke(); [34, 35]
 
             const x1_v2 = x + length / 2;
             const y1_v2 = y - length / 2;
             const x2_v2 = x + length / 2;
             const y2_v2 = y + length / 2;
-            ctx.beginPath();
-            ctx.moveTo(x1_v2, y1_v2);
-            ctx.lineTo(x2_v2, y2_v2);
-            ctx.stroke();
+            ctx.beginPath(); [34, 35]
+            ctx.moveTo(x1_v2, y1_v2); [34, 35]
+            ctx.lineTo(x2_v2, y2_v2); [34, 35]
+            ctx.stroke(); [34, 35]
 
-            const newLength = length / Math.sqrt(2); [15, 16]
+            const newLength = length / Math.sqrt(2);
             const newDepth = depth - 1;
 
             // Recursively draw H-trees at the four new endpoints
-            drawHTree(x - length / 2, y - length / 2, newLength, newDepth); [16]
-            drawHTree(x - length / 2, y + length / 2, newLength, newDepth); [16]
-            drawHTree(x + length / 2, y - length / 2, newLength, newDepth); [16]
-            drawHTree(x + length / 2, y + length / 2, newLength, newDepth); [16]
+            drawHTree(x - length / 2, y - length / 2, newLength, newDepth); [36]
+            drawHTree(x - length / 2, y + length / 2, newLength, newDepth); [36]
+            drawHTree(x + length / 2, y - length / 2, newLength, newDepth); [36]
+            drawHTree(x + length / 2, y + length / 2, newLength, newDepth); [36]
         }
 
         // Handle Clock Tree Synthesis button click
@@ -417,17 +420,99 @@ pin (Z) { direction : output; function : "I'"; }
                 // Clear previous drawing
                 ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
 
-                // Draw a simple H-tree for demonstration
+                // Draw a simple H-tree for demonstration [37, 38, 39, 40]
                 const centerX = designCanvas.width / 2;
                 const centerY = designCanvas.height / 2;
                 const initialLength = Math.min(designCanvas.width, designCanvas.height) * 0.8;
                 const depth = 3; // Number of H-tree levels
 
-                drawHTree(centerX, centerY, initialLength, depth); [16]
+                drawHTree(centerX, centerY, initialLength, depth); [36]
 
                 term.write('\r\nClock Tree Synthesis complete. H-tree drawn on canvas.\r\n>');
             } catch (error) {
                 term.write(`\r\nError during Clock Tree Synthesis: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
+
+        // Handle Route Wires button click
+        routeBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Route Wires...\r\n');
+            try {
+                if (!currentNetlist |
+| Object.keys(placedCells).length === 0) {
+term.write('Please perform Synthesis and Placement first.\r\n>');
+return;
+}
+
+                // Clear previous drawing but keep cells
+                // We need to redraw cells to ensure they are on top of wires
+                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
+
+                // Redraw placed cells
+                for (const cellName in placedCells) {
+                    const cell = placedCells[cellName];
+                    ctx.fillStyle = 'lightblue';
+                    ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
+                    ctx.strokeStyle = 'black';
+                    ctx.strokeRect(cell.x, cell.y, cell.width, cell.height);
+                    ctx.fillStyle = 'black';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(cellName, cell.x + cell.width / 2, cell.y + cell.height / 2);
+                }
+
+                // Build a map of wire ID to connected cell names
+                const wireToCells = {};
+                const moduleName = Object.keys(currentNetlist.modules);
+                const cellsInNetlist = currentNetlist.modules[moduleName].cells;
+
+                for (const cellName in cellsInNetlist) {
+                    const cellData = cellsInNetlist[cellName];
+                    for (const portName in cellData.connections) {
+                        const wireIds = cellData.connections[portName];
+                        for (const wireId of wireIds) {
+                            if (!wireToCells[wireId]) {
+                                wireToCells[wireId] = new Set();
+                            }
+                            wireToCells[wireId].add(cellName);
+                        }
+                    }
+                }
+
+                // Draw lines between connected cells
+                ctx.strokeStyle = 'green'; // Color for routes
+                ctx.lineWidth = 1;
+
+                for (const wireId in wireToCells) {
+                    const connectedCellNames = Array.from(wireToCells[wireId]);
+                    if (connectedCellNames.length > 1) {
+                        // For simplicity, connect all cells on a net to the first cell on that net
+                        const firstCellName = connectedCellNames;
+                        const firstCell = placedCells[firstCellName];
+                        const startX = firstCell.x + firstCell.width / 2;
+                        const startY = firstCell.y + firstCell.height / 2;
+
+                        for (let i = 1; i < connectedCellNames.length; i++) {
+                            const otherCellName = connectedCellNames[i];
+                            const otherCell = placedCells[otherCellName];
+                            const endX = otherCell.x + otherCell.width / 2;
+                            const endY = otherCell.y + otherCell.height / 2;
+
+                            ctx.beginPath(); [34, 35]
+                            ctx.moveTo(startX, startY); [34, 35]
+                            ctx.lineTo(endX, endY); [34, 35]
+                            ctx.stroke(); [34, 35]
+                        }
+                    }
+                }
+
+                term.write('\r\nWires routed. Final layout displayed.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during routing: ${error}\r\n>`);
             } finally {
                 setButtonsEnabled(true); // Re-enable buttons
             }
