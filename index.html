@@ -236,7 +236,7 @@ pin (Z) { direction : output; function : "I'"; }
         setButtonsEnabled(false); // Disable buttons during operation
         term.write('\r\nRunning Synthesize Generic...\r\n');
         try {
-            // Run Yosys command for generic synthesis [12, 3, 13, 4, 5, 6, 7, 8, 1, 9, 10, 11]
+            // Run Yosys command for generic synthesis
             await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']);
 
             term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
@@ -257,7 +257,7 @@ pin (Z) { direction : output; function : "I'"; }
             // Write dummy Liberty file to the virtual file system
             yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent);
 
-            // Run Yosys command for technology mapping [12, 3, 13, 4, 5, 6, 7, 8, 1, 9, 10, 11, 14, 15]
+            // Run Yosys command for technology mapping
             await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']);
 
             term.write('\r\nTechnology Mapping complete. You can now proceed with optimization or netlist generation.\r\n>');
@@ -273,7 +273,7 @@ pin (Z) { direction : output; function : "I'"; }
         setButtonsEnabled(false); // Disable buttons during operation
         term.write('\r\nRunning Synthesize Optimize...\r\n');
         try {
-            // Run Yosys command for optimization [12, 3, 13, 4, 5, 6, 7, 16, 8, 1, 9, 10, 11]
+            // Run Yosys command for optimization [3, 4, 12, 13, 5, 14, 6, 7, 9, 10]
             await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']);
 
             term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
@@ -289,18 +289,18 @@ pin (Z) { direction : output; function : "I'"; }
         setButtonsEnabled(false); // Disable buttons during operation
         term.write('\r\nGenerating Gate-Level Netlist...\r\n');
         try {
-            // Write the netlist to a JSON file in the virtual file system [17, 18, 19, 20, 21, 22]
+            // Write the netlist to a JSON file in the virtual file system [15, 16, 17, 18, 19]
             await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']);
 
             // Read the generated JSON file content
             const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
-            currentNetlist = JSON.parse(netlistJson); // Store the netlist globally [23, 24, 25]
+            currentNetlist = JSON.parse(netlistJson); // Store the netlist globally
 
             // Create a Blob from the JSON string
             const blob = new Blob([netlistJson], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
 
-            // Create a temporary link and trigger download [26, 27, 28]
+            // Create a temporary link and trigger download
             const a = document.createElement('a');
             a.href = url;
             a.download = 'gate_level_netlist.json';
@@ -330,14 +330,14 @@ pin (Z) { direction : output; function : "I'"; }
             // Clear previous drawing
             ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
 
-            const moduleName = Object.keys(currentNetlist.modules); // Get the first module
-            const cells = currentNetlist.modules[moduleName].cells; [17, 20, 25]
+            const moduleName = Object.keys(currentNetlist.modules); // Get the first module [15, 16, 18]
+            const cells = currentNetlist.modules[moduleName].cells;
 
             placedCells = {}; // Reset for new placement
             const cellWidth = 50; // Fixed width for visualization
             const cellHeight = 30; // Fixed height for visualization
 
-            // Simple random placement [29, 23, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
+            // Simple random placement [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]
             for (const cellName in cells) {
                 const x = Math.random() * (designCanvas.width - cellWidth);
                 const y = Math.random() * (designCanvas.height - cellHeight);
@@ -491,7 +491,7 @@ return;
                 const connectedCellNames = Array.from(wireToCells[wireId]);
                 if (connectedCellNames.length > 1) {
                     // For simplicity, connect all cells on a net to the first cell on that net
-                    const firstCellName = connectedCellNames;
+                    const firstCellName = connectedCellNames; // Fix: Access the first element
                     const firstCell = placedCells[firstCellName];
                     const startX = firstCell.x + firstCell.width / 2;
                     const startY = firstCell.y + firstCell.height / 2;
