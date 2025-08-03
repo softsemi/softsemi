@@ -23,9 +23,7 @@
                 <h2>1. Upload Your Design (Verilog RTL)</h2>
                 <input type="file" id="rtlFileInput" accept=".v,.sv">
                 <p>Or type your Verilog code here:</p>
-                <textarea id="rtlCodeInput" placeholder="module my_design(input A, B, output Y);
-    assign Y = A & B;
-endmodule">module my_design(input A, B, output Y);
+                <textarea id="rtlCodeInput" placeholder="module my_design(input A, B, output Y);&#10;    assign Y = A & B;&#10;endmodule">module my_design(input A, B, output Y);
     assign Y = A & B;
 endmodule</textarea>
             </div>
@@ -56,7 +54,7 @@ endmodule</textarea>
             <div class="section">
                 <h2>Terminal Output</h2>
                 <div id="terminal-output-container">
-                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -78,16 +76,11 @@ endmodule</textarea>
         const ctx = designCanvas.getContext('2d');
 
         // --- Global State Variables ---
-        let yosysModule; // This will hold the initialized Yosys WASM module.
-        let currentNetlist = null; // Stores the parsed JSON netlist after successful synthesis.
-        let placedCells = {}; // Stores the coordinates and dimensions of cells after placement.
-        const allButtons = Array.from(document.querySelectorAll('button')); // Collect all buttons to enable/disable them.
+        let yosysModule;
+        let currentNetlist = null;
+        let placedCells = {};
+        const allButtons = Array.from(document.querySelectorAll('button'));
 
-        /**
-         * Enables or disables all buttons and input fields on the page.
-         * This is used to prevent user interaction while a long process is running.
-         * @param {boolean} enabled - True to enable controls, false to disable.
-         */
         function setControlsEnabled(enabled) {
             allButtons.forEach(button => button.disabled =!enabled);
             rtlFileInput.disabled =!enabled;
@@ -108,13 +101,9 @@ endmodule</textarea>
         window.addEventListener('resize', () => fitAddon.fit());
 
         // --- Yosys WASM Initialization ---
-
-        // The Module object is a special object that Emscripten (the WASM compiler)
-        // looks for. We configure it to redirect Yosys's stdout and stderr
-        // to our xterm.js terminal instance.
         var Module = {
             print: (text) => { term.write(text + '\r\n'); },
-            printErr: (text) => { term.write('\x1b; // Correctly get the first file
+            printErr: (text) => { term.write('\x1b;
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -124,7 +113,6 @@ endmodule</textarea>
             }
         });
 
-        // Handle the main "Run Full Synthesis" button click
         runSynthesisBtn.addEventListener('click', async () => {
             const verilogCode = rtlCodeInput.value;
             if (!verilogCode.trim()) {
@@ -135,39 +123,47 @@ endmodule</textarea>
             setControlsEnabled(false);
             term.clear();
             term.write('--- Starting Full Synthesis Flow ---\r\n');
-            currentNetlist = null; // Clear previous results
+            currentNetlist = null;
             placedCells = {};
             ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
             netlistDownloadLink.innerHTML = '';
 
             try {
-                // Step 1: Fetch the technology library file (ASAP7) from GitHub.
                 const libertyURL = 'https://raw.githubusercontent.com/Centre-for-Hardware-Security/asap7_reference_design/main/lib/asap7sc7p5t_24_R_TT_1p00V_25C.lib';
-                term.write(`1. Fetching technology library from ${libertyURL}...\r\n`);
+                term.write(`1. Fetching technology library...\r\n`);
                 const response = await fetch(libertyURL);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                if (!response.ok) throw new Error(`HTTP error fetching library! status: ${response.status}`);
                 const libertyFileContent = await response.text();
                 term.write('  ... Library fetched successfully.\r\n');
 
-                // Step 2: Write input files to Yosys's virtual filesystem.
                 term.write('2. Preparing virtual filesystem...\r\n');
                 yosysModule.FS.writeFile('/input.v', verilogCode);
                 yosysModule.FS.writeFile('/asap7.lib', libertyFileContent);
                 term.write('  ... Virtual files created.\r\n');
 
-                // Step 3: Define the complete, multi-step Yosys synthesis script.
-                // This single script is executed in one atomic Yosys run.
-                const synthesisScript =.join('; ');
+                const synthesisScript = [
+                    'read_verilog /input.v',
+                    'hierarchy -check -top my_design',
+                    'proc',
+                    'opt',
+                    'fsm',
+                    'opt',
+                    'memory',
+                    'opt',
+                    'techmap',
+                    'opt',
+                    'dfflibmap -liberty /asap7.lib',
+                    'abc -liberty /asap7.lib',
+                    'clean',
+                    'write_json /output.json'
+                ].join('; ');
 
-                // Step 4: Execute the synthesis script.
                 term.write('3. Running Yosys Synthesis Script...\r\n');
                 term.write('----------------------------------------\r\n');
                 await yosysModule.callMain();
                 term.write('----------------------------------------\r\n');
                 term.write('\x1b;
                 const cells = currentNetlist.modules[moduleName].cells;
-
-                // --- Simple Random Placement Algorithm (for demonstration) ---
                 const cellWidth = 60;
                 const cellHeight = 40;
                 const padding = 10;
@@ -189,7 +185,6 @@ endmodule</textarea>
             }
         });
 
-        // Handle "Route Wires" button click
         routeBtn.addEventListener('click', () => {
             if (!currentNetlist |
 
@@ -201,14 +196,10 @@ endmodule</textarea>
             setControlsEnabled(false);
 
             try {
-                // Redraw canvas with cells on top
                 ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
-
-                // --- Simple "Star" Routing Algorithm (for demonstration) ---
                 const wireToCells = buildWireMap();
                 drawRoutes(wireToCells);
 
-                // Redraw cells so they appear on top of the routes
                 for (const cellName in placedCells) {
                     drawCell(cellName, placedCells[cellName]);
                 }
@@ -221,20 +212,12 @@ endmodule</textarea>
             }
         });
 
-
         // --- Helper and Drawing Functions ---
-
-        /**
-         * Draws a single cell on the canvas.
-         * @param {string} name - The name of the cell.
-         * @param {object} info - An object with x, y, width, height properties.
-         */
         function drawCell(name, info) {
             ctx.fillStyle = 'lightblue';
             ctx.fillRect(info.x, info.y, info.width, info.height);
             ctx.strokeStyle = 'darkblue';
             ctx.strokeRect(info.x, info.y, info.width, info.height);
-
             ctx.fillStyle = 'black';
             ctx.font = '10px Arial';
             ctx.textAlign = 'center';
@@ -242,10 +225,6 @@ endmodule</textarea>
             ctx.fillText(name, info.x + info.width / 2, info.y + info.height / 2);
         }
 
-        /**
-         * Parses the netlist to create a map of wire IDs to the cells they connect.
-         * @returns {object} An object where keys are wire IDs and values are Sets of cell names.
-         */
         function buildWireMap() {
             const wireMap = {};
             const moduleName = Object.keys(currentNetlist.modules);
@@ -259,7 +238,6 @@ endmodule</textarea>
                         if (!wireMap[wireId]) {
                             wireMap[wireId] = new Set();
                         }
-                        // Only add if the cell has been placed (i.e., it's not a pseudo-cell)
                         if (placedCells[cellName]) {
                            wireMap[wireId].add(cellName);
                         }
@@ -269,26 +247,23 @@ endmodule</textarea>
             return wireMap;
         }
 
-        /**
-         * Draws the routes (wires) on the canvas based on the wire map.
-         * @param {object} wireToCells - The map of wires to connected cells.
-         */
         function drawRoutes(wireToCells) {
-            ctx.strokeStyle = 'rgba(0, 128, 0, 0.7)'; // Semi-transparent green
+            ctx.strokeStyle = 'rgba(0, 128, 0, 0.7)';
             ctx.lineWidth = 1;
 
             for (const wireId in wireToCells) {
                 const connectedCellNames = Array.from(wireToCells[wireId]);
                 if (connectedCellNames.length > 1) {
-                    // Simple star routing: connect all pins on a net to the first pin.
                     const firstCellName = connectedCellNames;
                     const firstCell = placedCells[firstCellName];
+                    if (!firstCell) continue;
                     const startX = firstCell.x + firstCell.width / 2;
                     const startY = firstCell.y + firstCell.height / 2;
 
                     for (let i = 1; i < connectedCellNames.length; i++) {
                         const otherCellName = connectedCellNames[i];
                         const otherCell = placedCells[otherCellName];
+                        if (!otherCell) continue;
                         const endX = otherCell.x + otherCell.width / 2;
                         const endY = otherCell.y + otherCell.height / 2;
 
@@ -301,13 +276,6 @@ endmodule</textarea>
             }
         }
 
-        /**
-         * Creates a downloadable link for a file.
-         * @param {string} content - The text content of the file.
-         * @param {string} fileName - The name for the downloaded file.
-         * @param {string} mimeType - The MIME type of the file.
-         * @param {HTMLElement} linkElement - The span element to place the link in.
-         */
         function createDownloadLink(content, fileName, mimeType, linkElement) {
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
@@ -315,7 +283,7 @@ endmodule</textarea>
             a.href = url;
             a.download = fileName;
             a.textContent = fileName;
-            linkElement.innerHTML = ''; // Clear previous link
+            linkElement.innerHTML = '';
             linkElement.appendChild(a);
         }
 
