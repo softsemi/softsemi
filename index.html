@@ -188,16 +188,32 @@
                 }
 
                 // Write Verilog code to the virtual file system
-                yosysModule.FS.writeFile('/input.v', verilogCode); [1, 2]
+                yosysModule.FS.writeFile('/input.v', verilogCode); [1]
 
                 // Run Yosys command for elaboration
                 // We assume the top module is named 'my_design' as per the placeholder
-                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [3, 4, 5]
+                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [2]
                 // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
 
                 term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
                 term.write(`\r\nError during elaboration: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
+
+        // Handle Synthesize Generic button click
+        synGenBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Synthesize Generic...\r\n');
+            try {
+                // Run Yosys command for generic synthesis
+                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [3]
+
+                term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during generic synthesis: ${error}\r\n>`);
             } finally {
                 setButtonsEnabled(true); // Re-enable buttons
             }
