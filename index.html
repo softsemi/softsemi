@@ -4,12 +4,12 @@
     <title>My VLSI Tool</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
-  .container { display: flex; gap: 20px; }
-  .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
-  .section { margin-bottom: 20px; }
-        textarea { width: 100%; height: 200px; margin-bottom: 10px; }
+       .container { display: flex; gap: 20px; }
+       .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
+       .section { margin-bottom: 20px; }
+        textarea { width: 100%; box-sizing: border-box; height: 200px; margin-bottom: 10px; font-family: monospace; }
         button { margin-right: 10px; padding: 8px 15px; }
-        #terminal-output { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
+        #terminal-output-container { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
         #layout-viewer { border: 1px solid #ccc; background-color: #f0f0f0; height: 400px; width: 100%; }
         #designCanvas { display: block; background-color: white; }
     </style>
@@ -23,25 +23,25 @@
                 <h2>1. Upload Your Design (Verilog RTL)</h2>
                 <input type="file" id="rtlFileInput" accept=".v,.sv">
                 <p>Or type your Verilog code here:</p>
-                <textarea id="rtlCodeInput" placeholder="module my_design(...);... endmodule;"></textarea>
+                <textarea id="rtlCodeInput" placeholder="module my_design(input A, B, output Y);
+    assign Y = A & B;
+endmodule">module my_design(input A, B, output Y);
+    assign Y = A & B;
+endmodule</textarea>
             </div>
 
             <div class="section">
-                <h2>2. Synthesis Steps</h2>
-                <button id="elaborateBtn">Elaborate</button>
-                <button id="synGenBtn">Synthesize Generic</button>
-                <button id="synMapBtn">Synthesize Map</button>
-                <button id="synOptBtn">Synthesize Optimize</button>
-                <button id="generateNetlistBtn">Generate Gate-Level Netlist</button>
-                <p>You can download your netlist here later.</p>
+                <h2>2. Synthesis Flow</h2>
+                <button id="runSynthesisBtn">Run Full Synthesis</button>
+                <p>This will run the complete flow: Elaborate, Synthesize, Map to ASAP7, and Optimize.</p>
+                <p>You can download your netlist here later: <span id="netlistDownloadLink"></span></p>
             </div>
 
             <div class="section">
                 <h2>3. Physical Design Steps</h2>
                 <button id="placeBtn">Place Cells</button>
-                <button id="ctsBtn">Clock Tree Synthesis</button>
                 <button id="routeBtn">Route Wires</button>
-                <p>You can download your DEF file here later.</p>
+                <p>You can download your DEF file here later: <span id="defDownloadLink"></span></p>
             </div>
         </div>
 
@@ -55,124 +55,66 @@
 
             <div class="section">
                 <h2>Terminal Output</h2>
-                <div id="terminal-output">
-                    Welcome to the VLSI Terminal!
-                    <br>Type 'help' for commands.
-                    <br>>
-                </div>
-                <input type="text" id="terminal-input" style="width: calc(100% - 10px); margin-top: 5px;">
+                <div id="terminal-output-container">
+                    </div>
             </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js"></script>
-    <script src="https://unpkg.com/@xterm/xterm/lib/xterm.js"></script>
-    <script src="https://unpkg.com/@xterm/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+
     <script>
-        const terminalElement = document.getElementById('terminal-output');
-        const terminalInput = document.getElementById('terminal-input');
+        // --- DOM Element References ---
+        const terminalContainer = document.getElementById('terminal-output-container');
         const rtlFileInput = document.getElementById('rtlFileInput');
         const rtlCodeInput = document.getElementById('rtlCodeInput');
-        const elaborateBtn = document.getElementById('elaborateBtn');
-        const synGenBtn = document.getElementById('synGenBtn');
-        const synMapBtn = document.getElementById('synMapBtn');
-        const synOptBtn = document.getElementById('synOptBtn');
-        const generateNetlistBtn = document.getElementById('generateNetlistBtn');
+        const runSynthesisBtn = document.getElementById('runSynthesisBtn');
         const placeBtn = document.getElementById('placeBtn');
-        const ctsBtn = document.getElementById('ctsBtn');
         const routeBtn = document.getElementById('routeBtn');
-
+        const netlistDownloadLink = document.getElementById('netlistDownloadLink');
         const designCanvas = document.getElementById('designCanvas');
         const ctx = designCanvas.getContext('2d');
 
-        // Fix: Populate the allButtons array with all the button elements
-        const allButtons =;
+        // --- Global State Variables ---
+        let yosysModule; // This will hold the initialized Yosys WASM module.
+        let currentNetlist = null; // Stores the parsed JSON netlist after successful synthesis.
+        let placedCells = {}; // Stores the coordinates and dimensions of cells after placement.
+        const allButtons = Array.from(document.querySelectorAll('button')); // Collect all buttons to enable/disable them.
 
-        function setButtonsEnabled(enabled) {
-            allButtons.forEach(button => {
-                button.disabled =!enabled;
-            });
+        /**
+         * Enables or disables all buttons and input fields on the page.
+         * This is used to prevent user interaction while a long process is running.
+         * @param {boolean} enabled - True to enable controls, false to disable.
+         */
+        function setControlsEnabled(enabled) {
+            allButtons.forEach(button => button.disabled =!enabled);
             rtlFileInput.disabled =!enabled;
             rtlCodeInput.disabled =!enabled;
         }
 
-        // Disable buttons initially
-        setButtonsEnabled(false);
-
+        // --- Terminal Setup (using xterm.js) ---
         const term = new Terminal({
             cursorBlink: true,
-            convertEol: true
+            convertEol: true,
+            rows: 15
         });
         const fitAddon = new FitAddon.FitAddon();
-
         term.loadAddon(fitAddon);
-        term.open(terminalElement);
+        term.open(terminalContainer);
         fitAddon.fit();
 
-        term.onData(e => {
-            // This sends data from the terminal to our input box
-            terminalInput.value += e;
-        });
+        window.addEventListener('resize', () => fitAddon.fit());
 
-        terminalInput.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                const command = terminalInput.value.trim();
-                term.write('\r\n> ' + command + '\r\n'); // Echo command
-                terminalInput.value = ''; // Clear input box
+        // --- Yosys WASM Initialization ---
 
-                // Handle simple commands for now
-                if (command === 'help') {
-                    term.write('Available commands: help, ls, cd, pwd\r\n');
-                } else if (command === 'ls') {
-                    term.write('index.html\r\ntech_files/\r\n');
-                } else if (command === 'pwd') {
-                    term.write('/\r\n');
-                } else if (command.startsWith('cd ')) {
-                    term.write('Changing directory is not fully supported yet.\r\n');
-                } else {
-                    term.write('Unknown command: ' + command + '\r\n');
-                }
-                term.write('>');
-            } else if (e.key === 'Backspace') {
-                // Handle backspace in the input field
-                if (terminalInput.value.length > 0) {
-                    terminalInput.value = terminalInput.value.slice(0, -1);
-                }
-            }
-        });
-
-        // Make terminal responsive to window resize
-        window.addEventListener('resize', () => {
-            fitAddon.fit();
-        });
-
-        // Initial prompt
-        term.write('>');
-
-        let yosysModule; // This will hold our Yosys tool
-        let currentNetlist = null; // Global variable to store the current netlist after synthesis
-        let placedCells = {}; // Global variable to store the positions of placed cells
-
-        // This special code helps Yosys talk to our terminal
+        // The Module object is a special object that Emscripten (the WASM compiler)
+        // looks for. We configure it to redirect Yosys's stdout and stderr
+        // to our xterm.js terminal instance.
         var Module = {
-            print: function(text) { term.write(text + '\r\n'); },
-            printErr: function(text) { term.write(text + '\r\n'); },
-            // This is needed for Yosys to work with files
-            FS: null
-        };
-
-        async function loadYosys() {
-            term.write('Loading VLSI brain... (this might take a moment)\r\n');
-            yosysModule = await runYosys(Module); [1, 2]
-            term.write('VLSI brain loaded! Type "help" in the terminal.\r\n>');
-            setButtonsEnabled(true); // Enable buttons after Yosys is loaded
-        }
-
-        loadYosys(); // Start loading Yosys when the page opens
-
-        // Handle file input
-        rtlFileInput.addEventListener('change', (event) => {
-            const file = event.target.files; [3, 4]
+            print: (text) => { term.write(text + '\r\n'); },
+            printErr: (text) => { term.write('\x1b; // Correctly get the first file
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -182,329 +124,204 @@
             }
         });
 
-        // Handle Elaborate button click
-        elaborateBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Elaborate...\r\n');
-            try {
-                const verilogCode = rtlCodeInput.value;
-                if (!verilogCode.trim()) {
-                    term.write('Please provide Verilog code in the text area or by uploading a file.\r\n>');
-                    return;
-                }
-
-                // Write Verilog code to the virtual file system
-                yosysModule.FS.writeFile('/input.v', verilogCode);
-
-                // Run Yosys command for elaboration
-                // We assume the top module is named 'my_design' as per the placeholder
-                await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']); [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
-
-                term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during elaboration: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Synthesize Generic button click
-        synGenBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Synthesize Generic...\r\n');
-            try {
-                // Run Yosys command for generic synthesis
-                await yosysModule.callMain(['-p', 'synth -top my_design', '-o', '/dev/stdout']); [5, 17, 18, 19, 7, 20, 11, 13, 14, 21, 16, 22]
-
-                term.write('\r\nGeneric Synthesis complete. You can now proceed with other synthesis steps.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during generic synthesis: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Synthesize Map button click
-        synMapBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Synthesize Map...\r\n');
-            try {
-                // Ensure tech_files directory exists in Yosys's virtual file system
-                yosysModule.FS.mkdir('/tech_files'); [23, 24, 25, 26]
-
-                // Fetch the actual Liberty file from the external GitHub URL
-                term.write('Fetching ASAP7.lib from GitHub (this may take a while due to file size)...\r\n');
-                // Using the raw content URL for the ASAP7.lib file
-                const response = await fetch('https://raw.githubusercontent.com/Centre-for-Hardware-Security/asap7_reference_design/main/lib/asap7sc7p5t_24_R_TT_1p00V_25C.lib');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const libertyFileContent = await response.text(); [27]
-                term.write('ASAP7.lib fetched. Writing to virtual file system...\r\n');
-
-                // Write the fetched Liberty file to the virtual file system
-                yosysModule.FS.writeFile('/tech_files/asap7sc7p5t_24_R_TT_1p00V_25C.lib', libertyFileContent);
-
-                // Run Yosys command for technology mapping
-                await yosysModule.callMain(); [10, 11, 28]
-
-                term.write('\r\nTechnology Mapping complete. You can now proceed with optimization or netlist generation.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during technology mapping: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Synthesize Optimize button click
-        synOptBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Synthesize Optimize...\r\n');
-            try {
-                // Run Yosys command for optimization
-                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [5, 17, 18, 19, 7, 20, 10, 29, 11, 13, 14, 21, 30, 16]
-
-                term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during optimization: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Generate Gate-Level Netlist button click
-        generateNetlistBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nGenerating Gate-Level Netlist...\r\n');
-            try {
-                // Write the netlist to a JSON file in the virtual file system
-                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [31, 32, 33, 34, 35, 36]
-
-                // Read the generated JSON file content
-                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
-                currentNetlist = JSON.parse(netlistJson); // Store the netlist globally [37, 38]
-
-                // Create a Blob from the JSON string
-                const blob = new Blob([netlistJson], { type: 'application/json' }); [39, 40, 41, 42, 43, 44, 45, 46]
-                const url = URL.createObjectURL(blob);
-
-                // Create a temporary link and trigger download
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'gate_level_netlist.json';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
-                term.write('\r\nGate-Level Netlist generated and downloaded as gate_level_netlist.json\r\n>');
-            } catch (error) {
-                term.write(`\r\nError generating netlist: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Place Cells button click
-        placeBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Place Cells...\r\n');
-            try {
-                if (!currentNetlist) {
-                    term.write('Please generate the Gate-Level Netlist first.\r\n>');
-                    return;
-                }
-
-                // Clear previous drawing
-                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
-
-                const moduleName = Object.keys(currentNetlist.modules); // Get the first module
-                const cells = currentNetlist.modules[moduleName].cells; [6, 31, 47, 34, 48, 36, 49]
-
-                placedCells = {}; // Reset for new placement
-                const cellWidth = 50; // Fixed width for visualization
-                const cellHeight = 30; // Fixed height for visualization
-
-                // Simple random placement [50, 51, 52, 17, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
-                for (const cellName in cells) {
-                    const x = Math.random() * (designCanvas.width - cellWidth);
-                    const y = Math.random() * (designCanvas.height - cellHeight);
-                    placedCells[cellName] = { x, y, width: cellWidth, height: cellHeight };
-
-                    // Draw cell as a rectangle
-                    ctx.fillStyle = 'lightblue';
-                    ctx.fillRect(x, y, cellWidth, cellHeight);
-                    ctx.strokeStyle = 'black';
-                    ctx.strokeRect(x, y, cellWidth, cellHeight);
-
-                    // Add cell name text
-                    ctx.fillStyle = 'black';
-                    ctx.font = '10px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(cellName, x + cellWidth / 2, y + cellHeight / 2);
-                }
-
-                term.write('\r\nCells placed. You can now proceed with Clock Tree Synthesis or Routing.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during placement: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Function to draw an H-tree
-        function drawHTree(x, y, length, depth) {
-            if (depth === 0) {
+        // Handle the main "Run Full Synthesis" button click
+        runSynthesisBtn.addEventListener('click', async () => {
+            const verilogCode = rtlCodeInput.value;
+            if (!verilogCode.trim()) {
+                Module.printErr('Error: Verilog code input is empty.');
                 return;
             }
 
-            // Horizontal line
-            const x1_h = x - length / 2;
-            const y1_h = y;
-            const x2_h = x + length / 2;
-            const y2_h = y;
-            ctx.beginPath();
-            ctx.moveTo(x1_h, y1_h);
-            ctx.lineTo(x2_h, y2_h);
-            ctx.strokeStyle = 'red';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+            setControlsEnabled(false);
+            term.clear();
+            term.write('--- Starting Full Synthesis Flow ---\r\n');
+            currentNetlist = null; // Clear previous results
+            placedCells = {};
+            ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
+            netlistDownloadLink.innerHTML = '';
 
-            // Vertical lines at ends of horizontal line
-            const x1_v1 = x - length / 2;
-            const y1_v1 = y - length / 2;
-            const x2_v1 = x - length / 2;
-            const y2_v1 = y + length / 2;
-            ctx.beginPath();
-            ctx.moveTo(x1_v1, y1_v1);
-            ctx.lineTo(x2_v1, y2_v1);
-            ctx.stroke();
+            try {
+                // Step 1: Fetch the technology library file (ASAP7) from GitHub.
+                const libertyURL = 'https://raw.githubusercontent.com/Centre-for-Hardware-Security/asap7_reference_design/main/lib/asap7sc7p5t_24_R_TT_1p00V_25C.lib';
+                term.write(`1. Fetching technology library from ${libertyURL}...\r\n`);
+                const response = await fetch(libertyURL);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const libertyFileContent = await response.text();
+                term.write('  ... Library fetched successfully.\r\n');
 
-            const x1_v2 = x + length / 2;
-            const y1_v2 = y - length / 2;
-            const x2_v2 = x + length / 2;
-            const y2_v2 = y + length / 2;
-            ctx.beginPath();
-            ctx.moveTo(x1_v2, y1_v2);
-            ctx.lineTo(x2_v2, y2_v2);
-            ctx.stroke();
+                // Step 2: Write input files to Yosys's virtual filesystem.
+                term.write('2. Preparing virtual filesystem...\r\n');
+                yosysModule.FS.writeFile('/input.v', verilogCode);
+                yosysModule.FS.writeFile('/asap7.lib', libertyFileContent);
+                term.write('  ... Virtual files created.\r\n');
 
-            const newLength = length / Math.sqrt(2); [64, 65, 66]
-            const newDepth = depth - 1;
+                // Step 3: Define the complete, multi-step Yosys synthesis script.
+                // This single script is executed in one atomic Yosys run.
+                const synthesisScript =.join('; ');
 
-            // Recursively draw H-trees at the four new endpoints
-            drawHTree(x - length / 2, y - length / 2, newLength, newDepth); [65, 67]
-            drawHTree(x - length / 2, y + length / 2, newLength, newDepth); [65, 67]
-            drawHTree(x + length / 2, y - length / 2, newLength, newDepth); [65, 67]
-            drawHTree(x + length / 2, y + length / 2, newLength, newDepth); [65, 67]
+                // Step 4: Execute the synthesis script.
+                term.write('3. Running Yosys Synthesis Script...\r\n');
+                term.write('----------------------------------------\r\n');
+                await yosysModule.callMain();
+                term.write('----------------------------------------\r\n');
+                term.write('\x1b;
+                const cells = currentNetlist.modules[moduleName].cells;
+
+                // --- Simple Random Placement Algorithm (for demonstration) ---
+                const cellWidth = 60;
+                const cellHeight = 40;
+                const padding = 10;
+
+                for (const cellName in cells) {
+                    const x = padding + Math.random() * (designCanvas.width - cellWidth - 2 * padding);
+                    const y = padding + Math.random() * (designCanvas.height - cellHeight - 2 * padding);
+                    
+                    const cellInfo = { x, y, width: cellWidth, height: cellHeight };
+                    placedCells[cellName] = cellInfo;
+                    
+                    drawCell(cellName, cellInfo);
+                }
+                term.write('Placement complete. Cells are randomly placed on the canvas.\r\n');
+            } catch (error) {
+                Module.printErr(`Placement Failed: ${error}`);
+            } finally {
+                setControlsEnabled(true);
+            }
+        });
+
+        // Handle "Route Wires" button click
+        routeBtn.addEventListener('click', () => {
+            if (!currentNetlist |
+
+| Object.keys(placedCells).length === 0) {
+                Module.printErr('Error: Must run synthesis and placement first.');
+                return;
+            }
+            term.write('\n--- Running Routing ---\r\n');
+            setControlsEnabled(false);
+
+            try {
+                // Redraw canvas with cells on top
+                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
+
+                // --- Simple "Star" Routing Algorithm (for demonstration) ---
+                const wireToCells = buildWireMap();
+                drawRoutes(wireToCells);
+
+                // Redraw cells so they appear on top of the routes
+                for (const cellName in placedCells) {
+                    drawCell(cellName, placedCells[cellName]);
+                }
+                term.write('Routing complete. Connections are drawn on the canvas.\r\n');
+
+            } catch (error) {
+                Module.printErr(`Routing Failed: ${error}`);
+            } finally {
+                setControlsEnabled(true);
+            }
+        });
+
+
+        // --- Helper and Drawing Functions ---
+
+        /**
+         * Draws a single cell on the canvas.
+         * @param {string} name - The name of the cell.
+         * @param {object} info - An object with x, y, width, height properties.
+         */
+        function drawCell(name, info) {
+            ctx.fillStyle = 'lightblue';
+            ctx.fillRect(info.x, info.y, info.width, info.height);
+            ctx.strokeStyle = 'darkblue';
+            ctx.strokeRect(info.x, info.y, info.width, info.height);
+
+            ctx.fillStyle = 'black';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, info.x + info.width / 2, info.y + info.height / 2);
         }
 
-        // Handle Clock Tree Synthesis button click
-        ctsBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Clock Tree Synthesis...\r\n');
-            try {
-                // Clear previous drawing
-                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
+        /**
+         * Parses the netlist to create a map of wire IDs to the cells they connect.
+         * @returns {object} An object where keys are wire IDs and values are Sets of cell names.
+         */
+        function buildWireMap() {
+            const wireMap = {};
+            const moduleName = Object.keys(currentNetlist.modules);
+            const cellsInNetlist = currentNetlist.modules[moduleName].cells;
 
-                // Draw a simple H-tree for demonstration
-                const centerX = designCanvas.width / 2;
-                const centerY = designCanvas.height / 2;
-                const initialLength = Math.min(designCanvas.width, designCanvas.height) * 0.8;
-                const depth = 3; // Number of H-tree levels
-
-                drawHTree(centerX, centerY, initialLength, depth); [65, 67]
-
-                term.write('\r\nClock Tree Synthesis complete. H-tree drawn on canvas.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during Clock Tree Synthesis: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
-            }
-        });
-
-        // Handle Route Wires button click
-        routeBtn.addEventListener('click', async () => {
-            setButtonsEnabled(false); // Disable buttons during operation
-            term.write('\r\nRunning Route Wires...\r\n');
-            try {
-                if (!currentNetlist || Object.keys(placedCells).length === 0) {
-term.write('Please perform Synthesis and Placement first.\r\n>');
-return;
-}
-
-                // Clear previous drawing but keep cells
-                // We need to redraw cells to ensure they are on top of wires
-                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
-
-                // Redraw placed cells
-                for (const cellName in placedCells) {
-                    const cell = placedCells[cellName];
-                    ctx.fillStyle = 'lightblue';
-                    ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
-                    ctx.strokeStyle = 'black';
-                    ctx.strokeRect(cell.x, cell.y, cell.width, cell.height);
-                    ctx.fillStyle = 'black';
-                    ctx.font = '10px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(cellName, cell.x + cell.width / 2, cell.y + cell.height / 2);
-                }
-
-                // Build a map of wire ID to connected cell names
-                const wireToCells = {};
-                const moduleName = Object.keys(currentNetlist.modules); // Get the first module
-                const cellsInNetlist = currentNetlist.modules[moduleName].cells; [31, 68, 34, 61, 36]
-
-                for (const cellName in cellsInNetlist) {
-                    const cellData = cellsInNetlist[cellName];
-                    for (const portName in cellData.connections) {
-                        const wireIds = cellData.connections[portName];
-                        for (const wireId of wireIds) {
-                            if (!wireToCells[wireId]) {
-                                wireToCells[wireId] = new Set();
-                            }
-                            wireToCells[wireId].add(cellName);
+            for (const cellName in cellsInNetlist) {
+                const cellData = cellsInNetlist[cellName];
+                for (const portName in cellData.connections) {
+                    const wireIds = cellData.connections[portName];
+                    for (const wireId of wireIds) {
+                        if (!wireMap[wireId]) {
+                            wireMap[wireId] = new Set();
+                        }
+                        // Only add if the cell has been placed (i.e., it's not a pseudo-cell)
+                        if (placedCells[cellName]) {
+                           wireMap[wireId].add(cellName);
                         }
                     }
                 }
+            }
+            return wireMap;
+        }
 
-                // Draw lines between connected cells
-                ctx.strokeStyle = 'green'; // Color for routes
-                ctx.lineWidth = 1;
+        /**
+         * Draws the routes (wires) on the canvas based on the wire map.
+         * @param {object} wireToCells - The map of wires to connected cells.
+         */
+        function drawRoutes(wireToCells) {
+            ctx.strokeStyle = 'rgba(0, 128, 0, 0.7)'; // Semi-transparent green
+            ctx.lineWidth = 1;
 
-                for (const wireId in wireToCells) {
-                    const connectedCellNames = Array.from(wireToCells[wireId]);
-                    if (connectedCellNames.length > 1) {
-                        // For simplicity, connect all cells on a net to the first cell on that net
-                        const firstCell = placedCells[connectedCellNames]; // Corrected to access the first element
-                        const startX = firstCell.x + firstCell.width / 2;
-                        const startY = firstCell.y + firstCell.height / 2;
+            for (const wireId in wireToCells) {
+                const connectedCellNames = Array.from(wireToCells[wireId]);
+                if (connectedCellNames.length > 1) {
+                    // Simple star routing: connect all pins on a net to the first pin.
+                    const firstCellName = connectedCellNames;
+                    const firstCell = placedCells[firstCellName];
+                    const startX = firstCell.x + firstCell.width / 2;
+                    const startY = firstCell.y + firstCell.height / 2;
 
-                        for (let i = 1; i < connectedCellNames.length; i++) {
-                            const otherCellName = connectedCellNames[i];
-                            const otherCell = placedCells[otherCellName];
-                            const endX = otherCell.x + otherCell.width / 2;
-                            const endY = otherCell.y + otherCell.height / 2;
+                    for (let i = 1; i < connectedCellNames.length; i++) {
+                        const otherCellName = connectedCellNames[i];
+                        const otherCell = placedCells[otherCellName];
+                        const endX = otherCell.x + otherCell.width / 2;
+                        const endY = otherCell.y + otherCell.height / 2;
 
-                            ctx.beginPath();
-                            ctx.moveTo(startX, startY);
-                            ctx.lineTo(endX, endY);
-                            ctx.stroke();
-                        }
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
                     }
                 }
-
-                term.write('\r\nWires routed. Final layout displayed.\r\n>');
-            } catch (error) {
-                term.write(`\r\nError during routing: ${error}\r\n>`);
-            } finally {
-                setButtonsEnabled(true); // Re-enable buttons
             }
-        });
+        }
+
+        /**
+         * Creates a downloadable link for a file.
+         * @param {string} content - The text content of the file.
+         * @param {string} fileName - The name for the downloaded file.
+         * @param {string} mimeType - The MIME type of the file.
+         * @param {HTMLElement} linkElement - The span element to place the link in.
+         */
+        function createDownloadLink(content, fileName, mimeType, linkElement) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.textContent = fileName;
+            linkElement.innerHTML = ''; // Clear previous link
+            linkElement.appendChild(a);
+        }
+
+        // --- Initial Application Load ---
+        loadYosys();
+
     </script>
 </body>
 </html>
-```
