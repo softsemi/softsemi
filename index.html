@@ -4,13 +4,14 @@
     <title>My VLSI Tool</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
-    .container { display: flex; gap: 20px; }
-    .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
-    .section { margin-bottom: 20px; }
+   .container { display: flex; gap: 20px; }
+   .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
+   .section { margin-bottom: 20px; }
         textarea { width: 100%; height: 200px; margin-bottom: 10px; }
         button { margin-right: 10px; padding: 8px 15px; }
         #terminal-output { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
         #layout-viewer { border: 1px solid #ccc; background-color: #f0f0f0; height: 400px; width: 100%; }
+        #designCanvas { display: block; background-color: white; }
     </style>
 </head>
 <body>
@@ -48,7 +49,7 @@
             <div class="section">
                 <h2>Design Visualization</h2>
                 <div id="layout-viewer">
-                    <p>Your circuit layout will be shown here after placement and routing.</p>
+                    <canvas id="designCanvas" width="780" height="380" style="border:1px solid #000;"></canvas>
                 </div>
             </div>
 
@@ -80,6 +81,9 @@
         const placeBtn = document.getElementById('placeBtn');
         const ctsBtn = document.getElementById('ctsBtn');
         const routeBtn = document.getElementById('routeBtn');
+
+        const designCanvas = document.getElementById('designCanvas');
+        const ctx = designCanvas.getContext('2d');
 
         const allButtons =;
 
@@ -122,8 +126,6 @@
                     term.write('index.html\r\ntech_files/\r\n');
                 } else if (command === 'pwd') {
                     term.write('/\r\n');
-                } else if (command.startsWith('cd ')) {
-                    term.write('Changing directory is not fully supported yet.\r\n');
                 } else {
                     term.write('Unknown command: ' + command + '\r\n');
                 }
@@ -210,12 +212,11 @@ pin (Z) { direction : output; function : "I'"; }
                 }
 
                 // Write Verilog code to the virtual file system
-                yosysModule.FS.writeFile('/input.v', verilogCode); [1, 2, 3, 4]
+                yosysModule.FS.writeFile('/input.v', verilogCode);
 
                 // Run Yosys command for elaboration
                 // We assume the top module is named 'my_design' as per the placeholder
                 await yosysModule.callMain(['-p', 'read_verilog input.v; hierarchy -top my_design', '-o', '/dev/stdout']);
-                // Note: yosysModule.callMain automatically redirects stdout/stderr to Module.print/printErr
 
                 term.write('\r\nElaboration complete. You can now proceed with other synthesis steps.\r\n>');
             } catch (error) {
@@ -249,7 +250,7 @@ pin (Z) { direction : output; function : "I'"; }
                 // Ensure tech_files directory exists
                 yosysModule.FS.mkdir('/tech_files'); [1, 2]
                 // Write dummy Liberty file to the virtual file system
-                yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent); [1, 2, 3, 4]
+                yosysModule.FS.writeFile('/tech_files/gscl45nm.lib', dummyLibertyFileContent);
 
                 // Run Yosys command for technology mapping
                 await yosysModule.callMain(['-p', 'read_liberty -lib /tech_files/gscl45nm.lib; techmap; abc -liberty /tech_files/gscl45nm.lib', '-o', '/dev/stdout']);
@@ -268,7 +269,7 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nRunning Synthesize Optimize...\r\n');
             try {
                 // Run Yosys command for optimization
-                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']); [5, 6]
+                await yosysModule.callMain(['-p', 'opt', '-o', '/dev/stdout']);
 
                 term.write('\r\nOptimization complete. You can now generate the netlist.\r\n>');
             } catch (error) {
@@ -284,14 +285,14 @@ pin (Z) { direction : output; function : "I'"; }
             term.write('\r\nGenerating Gate-Level Netlist...\r\n');
             try {
                 // Write the netlist to a JSON file in the virtual file system
-                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [7]
+                await yosysModule.callMain(['-p', 'write_json /output.json', '-o', '/dev/stdout']); [3, 4, 5, 6, 7]
 
                 // Read the generated JSON file content
-                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' }); [2, 8]
+                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
 
                 // Create a Blob from the JSON string
-                const blob = new Blob([netlistJson], { type: 'application/json' }); [9, 10, 11, 12]
-                const url = URL.createObjectURL(blob); [9, 10, 11, 12]
+                const blob = new Blob([netlistJson], { type: 'application/json' }); [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+                const url = URL.createObjectURL(blob); [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
                 // Create a temporary link and trigger download
                 const a = document.createElement('a');
@@ -300,11 +301,58 @@ pin (Z) { direction : output; function : "I'"; }
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url); [9, 10, 11, 12]
+                URL.revokeObjectURL(url); [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
                 term.write('\r\nGate-Level Netlist generated and downloaded as gate_level_netlist.json\r\n>');
             } catch (error) {
                 term.write(`\r\nError generating netlist: ${error}\r\n>`);
+            } finally {
+                setButtonsEnabled(true); // Re-enable buttons
+            }
+        });
+
+        // Handle Place Cells button click
+        placeBtn.addEventListener('click', async () => {
+            setButtonsEnabled(false); // Disable buttons during operation
+            term.write('\r\nRunning Place Cells...\r\n');
+            try {
+                // Clear previous drawing
+                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
+
+                // Read the netlist JSON (assuming it was generated in the previous step)
+                const netlistJson = yosysModule.FS.readFile('/output.json', { encoding: 'utf8' });
+                const netlist = JSON.parse(netlistJson); [20, 21]
+
+                const moduleName = Object.keys(netlist.modules); // Get the first module
+                const cells = netlist.modules[moduleName].cells; [3, 22]
+
+                const cellPositions = {};
+                const cellWidth = 50; // Fixed width for visualization
+                const cellHeight = 30; // Fixed height for visualization
+
+                // Simple random placement
+                for (const cellName in cells) {
+                    const x = Math.random() * (designCanvas.width - cellWidth);
+                    const y = Math.random() * (designCanvas.height - cellHeight);
+                    cellPositions[cellName] = { x, y };
+
+                    // Draw cell as a rectangle
+                    ctx.fillStyle = 'lightblue';
+                    ctx.fillRect(x, y, cellWidth, cellHeight); [23, 24, 25, 26, 27, 28]
+                    ctx.strokeStyle = 'black';
+                    ctx.strokeRect(x, y, cellWidth, cellHeight); [23, 24, 25, 26, 27, 28]
+                    
+                    // Add cell name text
+                    ctx.fillStyle = 'black';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(cellName, x + cellWidth / 2, y + cellHeight / 2);
+                }
+
+                term.write('\r\nCells placed. You can now proceed with Clock Tree Synthesis or Routing.\r\n>');
+            } catch (error) {
+                term.write(`\r\nError during placement: ${error}\r\n>`);
             } finally {
                 setButtonsEnabled(true); // Re-enable buttons
             }
