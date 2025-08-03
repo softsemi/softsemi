@@ -2,9 +2,66 @@
 <html>
 <head>
     <title>My VLSI Tool</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+       .container { display: flex; gap: 20px; }
+       .left-panel,.right-panel { flex: 1; border: 1px solid #ccc; padding: 15px; }
+       .section { margin-bottom: 20px; }
+        textarea { width: 100%; height: 200px; margin-bottom: 10px; }
+        button { margin-right: 10px; padding: 8px 15px; }
+        #terminal-output { background-color: black; color: white; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
+        #layout-viewer { border: 1px solid #ccc; background-color: #f0f0f0; height: 400px; width: 100%; }
+    </style>
 </head>
 <body>
-    <h1>Welcome to My VLSI Tool!</h1>
-    <p>This is where we will build our awesome design tool.</p>
+    <h1>My VLSI Tool for Students</h1>
+
+    <div class="container">
+        <div class="left-panel">
+            <div class="section">
+                <h2>1. Upload Your Design (Verilog RTL)</h2>
+                <input type="file" id="rtlFileInput" accept=".v,.sv">
+                <p>Or type your Verilog code here:</p>
+                <textarea id="rtlCodeInput" placeholder="module my_design(...);... endmodule;"></textarea>
+            </div>
+
+            <div class="section">
+                <h2>2. Synthesis Steps</h2>
+                <button id="elaborateBtn">Elaborate</button>
+                <button id="synGenBtn">Synthesize Generic</button>
+                <button id="synMapBtn">Synthesize Map</button>
+                <button id="synOptBtn">Synthesize Optimize</button>
+                <button id="generateNetlistBtn">Generate Gate-Level Netlist</button>
+                <p>You can download your netlist here later.</p>
+            </div>
+
+            <div class="section">
+                <h2>3. Physical Design Steps</h2>
+                <button id="placeBtn">Place Cells</button>
+                <button id="ctsBtn">Clock Tree Synthesis</button>
+                <button id="routeBtn">Route Wires</button>
+                <p>You can download your DEF file here later.</p>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="section">
+                <h2>Design Visualization</h2>
+                <div id="layout-viewer">
+                    <p>Your circuit layout will be shown here after placement and routing.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Terminal Output</h2>
+                <div id="terminal-output">
+                    Welcome to the VLSI Terminal!
+                    <br>Type 'help' for commands.
+                    <br>>
+                </div>
+                <input type="text" id="terminal-input" style="width: calc(100% - 10px); margin-top: 5px;">
+            </div>
+        </div>
+    </div>
 </body>
 </html>
