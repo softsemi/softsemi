@@ -59,11 +59,13 @@ endmodule</textarea>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 
-    <script>
+    <script type="module">
+        // Import the modern runYosys function from the YoWASP package [1]
+        import { runYosys } from 'https://cdn.jsdelivr.net/npm/@yowasp/yosys/gen/bundle.js';
+
         // --- DOM Element References ---
         const terminalContainer = document.getElementById('terminal-output-container');
         const rtlFileInput = document.getElementById('rtlFileInput');
@@ -76,9 +78,7 @@ endmodule</textarea>
         const ctx = designCanvas.getContext('2d');
 
         // --- Global State Variables ---
-        let yosysModule;
         let currentNetlist = null;
-        let placedCells = {};
         const allButtons = Array.from(document.querySelectorAll('button'));
 
         function setControlsEnabled(enabled) {
@@ -100,23 +100,23 @@ endmodule</textarea>
 
         window.addEventListener('resize', () => fitAddon.fit());
 
-        // --- Yosys WASM Initialization ---
-        var Module = {
-            print: (text) => { term.write(text + '\r\n'); },
-            printErr: (text) => { term.write('\x1b;
+        // Helper to write colored text to terminal for better feedback
+        function termWriteError(text) {
+            term.write(`\x1b;
             if (file) {
-                const reader = new FileReader();
+                const reader = new FileReader(); // [2, 3]
                 reader.onload = (e) => {
                     rtlCodeInput.value = e.target.result;
                 };
-                reader.readAsText(file);
+                reader.readAsText(file); // [4, 5]
             }
         });
 
+        // --- Synthesis Button Handler (Updated with modern API) ---
         runSynthesisBtn.addEventListener('click', async () => {
             const verilogCode = rtlCodeInput.value;
             if (!verilogCode.trim()) {
-                Module.printErr('Error: Verilog code input is empty.');
+                termWriteError('Error: Verilog code input is empty.\r\n');
                 return;
             }
 
@@ -124,158 +124,80 @@ endmodule</textarea>
             term.clear();
             term.write('--- Starting Full Synthesis Flow ---\r\n');
             currentNetlist = null;
-            placedCells = {};
             ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
             netlistDownloadLink.innerHTML = '';
 
             try {
+                // 1. Fetch the Liberty library file from the GitHub repo you provided
                 const libertyURL = 'https://raw.githubusercontent.com/Centre-for-Hardware-Security/asap7_reference_design/main/lib/asap7sc7p5t_24_R_TT_1p00V_25C.lib';
-                term.write(`1. Fetching technology library...\r\n`);
+                term.write('1. Fetching technology library...\r\n');
                 const response = await fetch(libertyURL);
-                if (!response.ok) throw new Error(`HTTP error fetching library! status: ${response.status}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error fetching library! status: ${response.status}`);
+                }
                 const libertyFileContent = await response.text();
                 term.write('  ... Library fetched successfully.\r\n');
 
-                term.write('2. Preparing virtual filesystem...\r\n');
-                yosysModule.FS.writeFile('/input.v', verilogCode);
-                yosysModule.FS.writeFile('/asap7.lib', libertyFileContent);
-                term.write('  ... Virtual files created.\r\n');
+                // 2. Prepare files for the virtual filesystem [1]
+                const filesIn = {
+                    'design.v': verilogCode,
+                    'asap7.lib': libertyFileContent
+                };
 
-                const synthesisScript = [
-                    'read_verilog /input.v',
-                    'hierarchy -check -top my_design',
-                    'proc',
-                    'opt',
-                    'fsm',
-                    'opt',
-                    'memory',
-                    'opt',
-                    'techmap',
-                    'opt',
-                    'dfflibmap -liberty /asap7.lib',
-                    'abc -liberty /asap7.lib',
-                    'clean',
-                    'write_json /output.json'
-                ].join('; ');
+                // 3. Define the Yosys command-line arguments
+                const args = [
+                    '-p',
+                    'read_verilog design.v; hierarchy -check -top my_design; proc; opt; fsm; opt; memory; opt; techmap; opt; dfflibmap -liberty asap7.lib; abc -liberty asap7.lib; clean; write_json output.json'
+                ];
 
-                term.write('3. Running Yosys Synthesis Script...\r\n');
+                // 4. Setup stdout/stderr handlers to show all Yosys output in the terminal [1]
+                const decoder = new TextDecoder();
+                const options = {
+                    stdout: (chunk) => {
+                        if (chunk) term.write(decoder.decode(chunk));
+                    },
+                    stderr: (chunk) => {
+                        if (chunk) term.write(decoder.decode(chunk));
+                    }
+                };
+
+                // 5. Run Yosys inside a try...catch block to handle errors [1]
+                term.write('2. Running Yosys Synthesis...\r\n');
                 term.write('----------------------------------------\r\n');
-                await yosysModule.callMain();
-                term.write('----------------------------------------\r\n');
-                term.write('\x1b;
-                const cells = currentNetlist.modules[moduleName].cells;
-                const cellWidth = 60;
-                const cellHeight = 40;
-                const padding = 10;
+                const filesOut = await runYosys(args, filesIn, options);
+                term.write('\r\n----------------------------------------\r\n');
 
-                for (const cellName in cells) {
-                    const x = padding + Math.random() * (designCanvas.width - cellWidth - 2 * padding);
-                    const y = padding + Math.random() * (designCanvas.height - cellHeight - 2 * padding);
-                    
-                    const cellInfo = { x, y, width: cellWidth, height: cellHeight };
-                    placedCells[cellName] = cellInfo;
-                    
-                    drawCell(cellName, cellInfo);
+                // 6. Process the results if successful
+                if (filesOut['output.json']) {
+                    termWriteSuccess('Synthesis successful!\r\n');
+                    const jsonContent = decoder.decode(filesOut['output.json']);
+                    currentNetlist = JSON.parse(jsonContent);
+                    term.write('  ... Parsed output netlist.\r\n');
+                    createDownloadLink(jsonContent, 'netlist.json', 'application/json', netlistDownloadLink);
+                    term.write('  ... Download link created.\r\n');
+                } else {
+                    throw new Error('Synthesis finished, but output.json was not found.');
                 }
-                term.write('Placement complete. Cells are randomly placed on the canvas.\r\n');
+
             } catch (error) {
-                Module.printErr(`Placement Failed: ${error}`);
+                termWriteError(`\r\n--- SYNTHESIS FAILED ---\r\n`);
+                termWriteError(error.message + '\r\n');
+                // The detailed error from Yosys is already printed to the terminal by the stderr callback
             } finally {
                 setControlsEnabled(true);
             }
+        });
+
+        // --- Placeholder button handlers for next steps ---
+        placeBtn.addEventListener('click', () => {
+            termWriteError('Placement functionality is not yet implemented.\r\n');
         });
 
         routeBtn.addEventListener('click', () => {
-            if (!currentNetlist |
-
-| Object.keys(placedCells).length === 0) {
-                Module.printErr('Error: Must run synthesis and placement first.');
-                return;
-            }
-            term.write('\n--- Running Routing ---\r\n');
-            setControlsEnabled(false);
-
-            try {
-                ctx.clearRect(0, 0, designCanvas.width, designCanvas.height);
-                const wireToCells = buildWireMap();
-                drawRoutes(wireToCells);
-
-                for (const cellName in placedCells) {
-                    drawCell(cellName, placedCells[cellName]);
-                }
-                term.write('Routing complete. Connections are drawn on the canvas.\r\n');
-
-            } catch (error) {
-                Module.printErr(`Routing Failed: ${error}`);
-            } finally {
-                setControlsEnabled(true);
-            }
+            termWriteError('Routing functionality is not yet implemented.\r\n');
         });
 
-        // --- Helper and Drawing Functions ---
-        function drawCell(name, info) {
-            ctx.fillStyle = 'lightblue';
-            ctx.fillRect(info.x, info.y, info.width, info.height);
-            ctx.strokeStyle = 'darkblue';
-            ctx.strokeRect(info.x, info.y, info.width, info.height);
-            ctx.fillStyle = 'black';
-            ctx.font = '10px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(name, info.x + info.width / 2, info.y + info.height / 2);
-        }
-
-        function buildWireMap() {
-            const wireMap = {};
-            const moduleName = Object.keys(currentNetlist.modules);
-            const cellsInNetlist = currentNetlist.modules[moduleName].cells;
-
-            for (const cellName in cellsInNetlist) {
-                const cellData = cellsInNetlist[cellName];
-                for (const portName in cellData.connections) {
-                    const wireIds = cellData.connections[portName];
-                    for (const wireId of wireIds) {
-                        if (!wireMap[wireId]) {
-                            wireMap[wireId] = new Set();
-                        }
-                        if (placedCells[cellName]) {
-                           wireMap[wireId].add(cellName);
-                        }
-                    }
-                }
-            }
-            return wireMap;
-        }
-
-        function drawRoutes(wireToCells) {
-            ctx.strokeStyle = 'rgba(0, 128, 0, 0.7)';
-            ctx.lineWidth = 1;
-
-            for (const wireId in wireToCells) {
-                const connectedCellNames = Array.from(wireToCells[wireId]);
-                if (connectedCellNames.length > 1) {
-                    const firstCellName = connectedCellNames;
-                    const firstCell = placedCells[firstCellName];
-                    if (!firstCell) continue;
-                    const startX = firstCell.x + firstCell.width / 2;
-                    const startY = firstCell.y + firstCell.height / 2;
-
-                    for (let i = 1; i < connectedCellNames.length; i++) {
-                        const otherCellName = connectedCellNames[i];
-                        const otherCell = placedCells[otherCellName];
-                        if (!otherCell) continue;
-                        const endX = otherCell.x + otherCell.width / 2;
-                        const endY = otherCell.y + otherCell.height / 2;
-
-                        ctx.beginPath();
-                        ctx.moveTo(startX, startY);
-                        ctx.lineTo(endX, endY);
-                        ctx.stroke();
-                    }
-                }
-            }
-        }
-
+        // --- Helper Function ---
         function createDownloadLink(content, fileName, mimeType, linkElement) {
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
@@ -286,10 +208,6 @@ endmodule</textarea>
             linkElement.innerHTML = '';
             linkElement.appendChild(a);
         }
-
-        // --- Initial Application Load ---
-        loadYosys();
-
     </script>
 </body>
 </html>
